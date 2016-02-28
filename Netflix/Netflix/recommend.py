@@ -10,7 +10,7 @@ def loadTrainData():
     with open('train.csv', 'rt') as file:
         data = csv.reader(file)       
         dataset = list(data)
-        for x in range(len(dataset)):            
+        for x in range(len(dataset)):
             for y in range(3):
                 dataset[x][y] = int(dataset[x][y])
     return np.array([el[0:3] for el in dataset])
@@ -34,41 +34,27 @@ def calcEdges(data):
     #CSR format is fast for operations
     return E.tocsr()
 
-def eval(averages, kmeans, vecs, test):
-    #Initialize confusion matrix for 5 ratings
-    cArray = [0] * 5
-    cMatrix = [cArray[:] for i in range(5)]
+def eval(averages, clusters, test):    
     #Determine the error rate
-    hits = 0
-    for x in range(len(test)):        
-        vec = vecs[test[x][0]]
-        cluster = kmeans.predict(vec)
-        ranking = averages[cluster] - 1
-        realRanking = test[x][2] - 1
-        cMatrix[realRanking][ranking] += 1
-        if ranking == realRanking:
-            hits += 1
-    return [hits, cMatrix]
+    mse = 0.0
+    for x in range(len(test)):
+        cluster = clusters[test[x][0]]
+        ranking = int(round(averages[cluster]))        
+        realRanking = test[x][2]
+        diff = realRanking - ranking
+        mse += diff * diff
+    return mse / float(len(test))
 
 def findAverages(clusters, k, data):
     res = [0] * k
     totals = [0] * k
-    print len(clusters)
-    print len(data)
     for i in range(len(data)):
         cluster = clusters[data[i][0]]
         res[cluster] += data[i][2]
         totals[cluster] += 1
     for i in range(k):
-        res[i] = int(round(res[i]/totals[i]))
+        res[i] /= float(totals[i])
     return res
-
-def clusterize(kmeans, vecs, k):
-    clusters = [0] * len(vecs)
-    for i in range(len(vecs)):
-        cluster = kmeans.predict(vecs[i])
-        clusters[i] = cluster[0]
-    return clusters
 
 data = loadTrainData()
 # Do KFold validation to optimize for # of clusters
@@ -78,18 +64,20 @@ for train_index, test_index in kf:
     trainData = data[train_index]
     testData = data[test_index]
     edges = calcEdges(trainData)
-    W = edges*edges.transpose()
+    #W = edges*edges.transpose()
+    W = edges.transpose()*edges
     W.setdiag(0,0)
     D = W.sum(1).flatten().tolist()[0]
     D = sp.diags(D, 0).tocsr()
-    L = D - W
-    for k in range(6, 12):
+    L = D - W    
+    for k in [5]:
         vals, vecs = scipy.sparse.linalg.eigs(L, k)
+        vecs = vecs.real;        
         kmeans = KMeans(n_clusters=k)
-        kmeans.fit(vecs)
-        clusters = clusterize(kmeans, vecs, k)
+        kmeans.fit(edges)
+        clusters = kmeans.predict(edges)        
         averages = findAverages(clusters, k, trainData)
-        [hits, cMatrix] = eval(averages, kmeans, vecs, testData)
-        print "k: ", k, " - hits: ", hits
+        mse = eval(averages, clusters, testData)
+        print "k: ", k, " - mse: ", mse
 
 test = loadTestData()
