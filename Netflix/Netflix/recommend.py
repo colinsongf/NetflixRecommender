@@ -1,7 +1,7 @@
 import numpy as np
-import scipy.sparse as sp
-import scipy.sparse.linalg
 from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import RandomizedPCA
 from sklearn.cross_validation import KFold
 import csv
 
@@ -23,61 +23,105 @@ def loadTestData():
     return [el[0:2] for el in dataset]
 
 def calcEdges(data):
-    n = len(data)
-    nMovieIDs = max([el[0] for el in data]) + 1
-    nUserIDs = max([el[1] for el in data]) + 1
-    #LIL format is fast for inserting
-    E = sp.lil_matrix((nMovieIDs, nUserIDs))    
+    n = len(data)        
+    usersDic = {}
+    usersId = 0
+    moviesDic = {}
+    moviesId = 0
     for i in range(n):
         r = data[i]
-        E[r[0],r[1]] = r[2]
-    #CSR format is fast for operations
-    return E.tocsr()
+        if r[0] not in moviesDic:
+            moviesDic[r[0]] = moviesId
+            moviesId += 1
+        if r[1] not in usersDic:
+            usersDic[r[1]] = usersId
+            usersId += 1
+    usersAvg = [0] * usersId
+    usersTot = [0] * usersId
+    for i in range(n):
+        user = usersDic[data[i][1]]
+        usersAvg[user] += data[i][2]
+        usersTot[user] += 1.0    
+    usersAvg = np.divide(np.array(usersAvg), np.array(usersTot))    
+    E = np.tile(usersAvg, (moviesId, 1))
+    for i in range(n):
+        user = usersDic[data[i][1]]
+        movie = moviesDic[data[i][0]]
+        E[movie, user] = data[i][2]
+    return E, usersDic, moviesDic
 
-def eval(averages, clusters, test):    
+def eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, moviesDic, test):    
     #Determine the error rate
     mse = 0.0
-    for x in range(len(test)):
-        cluster = clusters[test[x][0]]
-        ranking = int(round(averages[cluster]))        
-        realRanking = test[x][2]
+    hits = 0
+    for i in range(len(test)):
+        if data[i][0] in moviesDic:
+            mId = moviesDic[data[i][0]]
+            cluster = movieClusters[mId]
+            movieRanking = movieAverages[cluster]
+        else:
+            movieRanking = 4
+        if data[i][1] in usersDic:
+            mId = usersDic[data[i][1]]
+            cluster = userClusters[mId]
+            userRanking = userAverages[cluster]
+        else:
+            userRanking = 4
+        realRanking = test[i][2]
+        ranking = int(round(0.5*userRanking + 0.5*movieRanking))
+        if ranking == realRanking:
+            hits += 1
         diff = realRanking - ranking
         mse += diff * diff
-    return mse / float(len(test))
+    return mse / float(len(test)), hits
 
-def findAverages(clusters, k, data):
+def findAverages(clusters, dic, ind, k, data):
     res = [0] * k
     totals = [0] * k
     for i in range(len(data)):
-        cluster = clusters[data[i][0]]
+        mId = dic[data[i][ind]]
+        cluster = clusters[mId]
         res[cluster] += data[i][2]
         totals[cluster] += 1
     for i in range(k):
         res[i] /= float(totals[i])
     return res
 
+def calcLaplacian(lowEdges):
+    W = cosine_similarity(lowEdges, lowEdges)
+    D = np.sum(W, 1)
+    D = np.eye(len(D)) * D
+    L = D - W
+    return L
+
+def clusterize(edges, k):
+    #L = calcLaplacian(edges)
+    #vals, vecs = np.linalg.eig(L)
+    #vecs = vecs.real;        
+    kmeans = KMeans(n_clusters=k)
+    return kmeans.fit_predict(edges)
+
 data = loadTrainData()
 # Do KFold validation to optimize for # of clusters
 n = len(data)
-kf = KFold(n, n_folds=10)
+kf = KFold(n, n_folds=2)
 for train_index, test_index in kf:        
     trainData = data[train_index]
     testData = data[test_index]
-    edges = calcEdges(trainData)
-    #W = edges*edges.transpose()
-    W = edges.transpose()*edges
-    W.setdiag(0,0)
-    D = W.sum(1).flatten().tolist()[0]
-    D = sp.diags(D, 0).tocsr()
-    L = D - W    
-    for k in [5]:
-        vals, vecs = scipy.sparse.linalg.eigs(L, k)
-        vecs = vecs.real;        
-        kmeans = KMeans(n_clusters=k)
-        kmeans.fit(edges)
-        clusters = kmeans.predict(edges)        
-        averages = findAverages(clusters, k, trainData)
-        mse = eval(averages, clusters, testData)
-        print "k: ", k, " - mse: ", mse
+    movieEdges, usersDic, moviesDic = calcEdges(trainData)
+    userEdges = movieEdges.T        
+    #Increasing k improves marginally perfomance (around 1% for k=1000) but it takes too much time to compute
+    k = 50
+    #Increasing n does not improve performance
+    n = 25    
+    pca = RandomizedPCA(n_components=n)    
+    lowMovieEdges = pca.fit_transform(movieEdges)
+    lowUserEdges = pca.fit_transform(userEdges)
+    movieClusters = clusterize(lowMovieEdges, k)
+    userClusters = clusterize(lowUserEdges, k)
+    movieAverages = findAverages(movieClusters, moviesDic, 0, k, trainData)
+    userAverages = findAverages(userClusters, usersDic, 1, k, trainData)
+    mse, hits = eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, moviesDic, testData)
+    print "n: ", n, " - mse: ", mse, " - hits: ", hits
 
 test = loadTestData()
