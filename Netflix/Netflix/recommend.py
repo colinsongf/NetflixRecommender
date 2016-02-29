@@ -3,6 +3,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import RandomizedPCA
 from sklearn.cross_validation import KFold
+from sklearn.preprocessing import Imputer
+from SoftImpute import SoftImpute
 import csv
 
 #Loads and parses train file 
@@ -36,18 +38,17 @@ def calcEdges(data):
         if r[1] not in usersDic:
             usersDic[r[1]] = usersId
             usersId += 1
-    usersAvg = [0] * usersId
-    usersTot = [0] * usersId
-    for i in range(n):
-        user = usersDic[data[i][1]]
-        usersAvg[user] += data[i][2]
-        usersTot[user] += 1.0    
-    usersAvg = np.divide(np.array(usersAvg), np.array(usersTot))    
-    E = np.tile(usersAvg, (moviesId, 1))
+    E = np.zeros((moviesId, usersId))
+    #E = np.full((moviesId, usersId), np.nan)
     for i in range(n):
         user = usersDic[data[i][1]]
         movie = moviesDic[data[i][0]]
         E[movie, user] = data[i][2]
+    estimator = Imputer(0, strategy='mean')
+    #estimator = SoftImpute()    
+    #estimator.fit(E)
+    #E = estimator.predict(E)
+    E = estimator.fit_transform(E)
     return E, usersDic, moviesDic
 
 def eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, moviesDic, test):    
@@ -68,6 +69,7 @@ def eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, mov
         else:
             userRanking = 4
         realRanking = test[i][2]
+        #50% each yields the best performance
         ranking = int(round(0.5*userRanking + 0.5*movieRanking))
         if ranking == realRanking:
             hits += 1
