@@ -127,3 +127,24 @@ for train_index, test_index in kf:
     print "n: ", n, " - mse: ", mse, " - hits: ", hits
 
 test = loadTestData()
+# Do KFold validation to optimize for # of clusters
+n = len(test)
+kf = KFold(n, n_folds=2)
+for train_index, test_index in kf:        
+    trainData = data[train_index]
+    testData = data[test_index]
+    movieEdges, usersDic, moviesDic = calcEdges(trainData)
+    userEdges = movieEdges.T        
+    #Increasing k improves marginally perfomance (around 1% for k=1000) but it takes too much time to compute
+    k = 50
+    #Increasing n does not improve performance
+    n = 25    
+    pca = RandomizedPCA(n_components=n)    
+    lowMovieEdges = pca.fit_transform(movieEdges)
+    lowUserEdges = pca.fit_transform(userEdges)
+    movieClusters = clusterize(lowMovieEdges, k)
+    userClusters = clusterize(lowUserEdges, k)
+    movieAverages = findAverages(movieClusters, moviesDic, 0, k, trainData)
+    userAverages = findAverages(userClusters, usersDic, 1, k, trainData)
+    mse, hits = eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, moviesDic, testData)
+    print "n: ", n, " - mse: ", mse, " - hits: ", hits
