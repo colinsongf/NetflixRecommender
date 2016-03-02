@@ -1,9 +1,10 @@
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.decomposition import RandomizedPCA
+from sklearn.decomposition import TruncatedSVD
 from sklearn.cross_validation import KFold
 from sklearn.preprocessing import Imputer
+from sklearn.linear_model import LinearRegression
 from SoftImpute import SoftImpute
 import csv
 
@@ -63,8 +64,8 @@ def eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, mov
         else:
             movieRanking = 4
         if data[i][1] in usersDic:
-            mId = usersDic[data[i][1]]
-            cluster = userClusters[mId]
+            uId = usersDic[data[i][1]]
+            cluster = userClusters[uId]
             userRanking = userAverages[cluster]
         else:
             userRanking = 4
@@ -106,23 +107,23 @@ def clusterize(edges, k):
 data = loadTrainData()
 # Do KFold validation to optimize for # of clusters
 n = len(data)
-kf = KFold(n, n_folds=2)
+kf = KFold(n, n_folds=4)
 for train_index, test_index in kf:        
     trainData = data[train_index]
-    testData = data[test_index]
+    testData = data[test_index]    
     movieEdges, usersDic, moviesDic = calcEdges(trainData)
-    userEdges = movieEdges.T        
+    userEdges = movieEdges.T    
     #Increasing k improves marginally perfomance (around 1% for k=1000) but it takes too much time to compute
     k = 50
     #Increasing n does not improve performance
     n = 25    
-    pca = RandomizedPCA(n_components=n)    
-    lowMovieEdges = pca.fit_transform(movieEdges)
-    lowUserEdges = pca.fit_transform(userEdges)
+    est = TruncatedSVD(n_components=n)    
+    lowMovieEdges = est.fit_transform(movieEdges)
+    lowUserEdges = est.fit_transform(userEdges)
     movieClusters = clusterize(lowMovieEdges, k)
     userClusters = clusterize(lowUserEdges, k)
     movieAverages = findAverages(movieClusters, moviesDic, 0, k, trainData)
-    userAverages = findAverages(userClusters, usersDic, 1, k, trainData)
+    userAverages = findAverages(userClusters, usersDic, 1, k, trainData)    
     mse, hits = eval(userAverages, userClusters, usersDic, movieAverages, movieClusters, moviesDic, testData)
     print "n: ", n, " - mse: ", mse, " - hits: ", hits
 
