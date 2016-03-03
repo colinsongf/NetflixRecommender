@@ -22,6 +22,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="crawl.py" />
     <Compile Include="recommend.py" />
     <Compile Include="SoftImpute.py" />
   </ItemGroup>
